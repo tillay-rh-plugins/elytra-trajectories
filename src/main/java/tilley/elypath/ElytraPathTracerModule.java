@@ -42,6 +42,19 @@ public class ElytraPathTracerModule extends ToggleableModule {
         return points;
     }
 
+    private List<Vec3> cutOffAfterCollision(List<Vec3> points) {
+        List<Vec3> newPoints = new ArrayList<>();
+        for (Vec3 point : points) {
+            newPoints.add(point);
+            BlockPos blockPos = BlockPos.containing(point);
+            if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) {
+                break;
+            }
+        }
+        return newPoints;
+    }
+
+
     // skidded asf
     private Vec3 updateFallFlyingMovement(Vec3 vec3, Vec3 lookAngle, float xRot) {
         float f = xRot * ((float)Math.PI / 180F);
@@ -74,7 +87,10 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
         IRenderer3D renderer = event.getRenderer();
         renderer.setLineWidth(12.0F);
-        List<Vec3> points = getTravelPoints(Math.round(predictTicks.getValue()));
+        int limit = Math.round(predictTicks.getValue());
+        List<Vec3> points = getTravelPoints(limit);
+        points = cutOffAfterCollision(points);
+
         if (points.size() < 2) return;
 
         renderer.begin(event.getMatrixStack());
@@ -83,12 +99,11 @@ public class ElytraPathTracerModule extends ToggleableModule {
             Vec3 p1 = points.get(i);
             Vec3 p2 = points.get(i + 1);
             renderer.drawLine(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 0xffff0000);
+        }
 
-            BlockPos blockPos = BlockPos.containing(p1);
-            if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) {
-                renderer.drawBox(blockPos, true, true, 0xffff0000);
-                break;
-            }
+        if (points.size() != limit) {
+            BlockPos blockPos = BlockPos.containing(points.getLast());
+            renderer.drawBox(blockPos, true, true, 0xffff0000);
         }
 
         renderer.end();
