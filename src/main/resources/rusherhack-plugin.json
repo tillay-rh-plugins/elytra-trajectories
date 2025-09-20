@@ -1,0 +1,16 @@
+{
+  "Plugin-Class": "tilley.elypath.ElytrapathPlugin",
+  "Name": "${project.plugin_name}",
+  "Version": "${project.plugin_version}",
+  "Description": "render a trajectory to predict where user will be going with elytra",
+  "URL": "",
+  "Authors": [
+    "tilley"
+  ],
+  "Minecraft-Versions": [
+    "1.21.4",
+    "1.21.3",
+    "1.21.2",
+    "1.21.1"
+  ]
+}
