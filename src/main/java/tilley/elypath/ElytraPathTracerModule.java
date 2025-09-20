@@ -1,5 +1,6 @@
 package tilley.elypath;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.rusherhack.client.api.events.render.EventRender3D;
@@ -14,7 +15,7 @@ import java.util.List;
 
 public class ElytraPathTracerModule extends ToggleableModule {
 
-    final NumberSetting<Float> predictTicks = new NumberSetting<>("PredictTicks", 2000f, 1f, 10000f).incremental(1f);
+    final NumberSetting<Float> predictTicks = new NumberSetting<>("PredictTicks", 2000f, 1f, 2000f).incremental(1f);
 
     public ElytraPathTracerModule() {
         super("ElytraTrajectories", "Render a trajectory to predict where player will be going with elytra", ModuleCategory.RENDER);
@@ -69,7 +70,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
     @Subscribe
     private void onRender3D(EventRender3D event) {
-        if (mc.player == null || !mc.player.isFallFlying()) return;
+        if (mc.player == null || !mc.player.isFallFlying() || mc.level == null) return;
 
         IRenderer3D renderer = event.getRenderer();
         renderer.setLineWidth(12.0F);
@@ -82,6 +83,12 @@ public class ElytraPathTracerModule extends ToggleableModule {
             Vec3 p1 = points.get(i);
             Vec3 p2 = points.get(i + 1);
             renderer.drawLine(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 0xffff0000);
+
+            BlockPos blockPos = BlockPos.containing(p1);
+            if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) {
+                renderer.drawBox(blockPos, true, true, 0xffff0000);
+                break;
+            }
         }
 
         renderer.end();
