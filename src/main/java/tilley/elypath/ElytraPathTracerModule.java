@@ -15,6 +15,7 @@ import java.util.List;
 
 public class ElytraPathTracerModule extends ToggleableModule {
 
+
     final NumberSetting<Float> predictTicks = new NumberSetting<>("PredictTicks", 2000f, 1f, 2000f).incremental(1f);
 
     public ElytraPathTracerModule() {
@@ -25,6 +26,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
         this.registerSettings(predictTicks);
     }
 
+    // Return all the points the user will be at up to limit ticks in the future
     private List<Vec3> getTravelPoints(int limit) {
         if (mc.player == null || !mc.player.isFallFlying()) return new ArrayList<>();
 
@@ -42,6 +44,8 @@ public class ElytraPathTracerModule extends ToggleableModule {
         return points;
     }
 
+    // Take in a list of points that user will go through without accounting for blocks
+    // This returns a new list that only has points leading up to collision with a block
     private List<Vec3> cutOffAfterCollision(List<Vec3> points) {
         List<Vec3> newPoints = new ArrayList<>();
         for (Vec3 point : points) {
@@ -56,6 +60,8 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
 
     // skidded asf
+    // I may or may not have no idea how this works, I just copied mc source code
+    // and changed various things to make it work here and fit in with other features
     private Vec3 updateFallFlyingMovement(Vec3 vec3, Vec3 lookAngle, float xRot) {
         float f = xRot * ((float)Math.PI / 180F);
         double d = Math.sqrt(lookAngle.x * lookAngle.x + lookAngle.z * lookAngle.z);
@@ -86,21 +92,21 @@ public class ElytraPathTracerModule extends ToggleableModule {
         if (mc.player == null || !mc.player.isFallFlying() || mc.level == null) return;
 
         IRenderer3D renderer = event.getRenderer();
-        renderer.setLineWidth(12.0F);
-        int limit = Math.round(predictTicks.getValue());
-        List<Vec3> points = getTravelPoints(limit);
-        points = cutOffAfterCollision(points);
+        int limit = Math.round(predictTicks.getValue()); // Maximum number of segments to make to avoid lag
+        List<Vec3> points = cutOffAfterCollision(getTravelPoints(limit)); // Get a list of point objects to generate segments between
 
-        if (points.size() < 2) return;
+        if (points.size() < 2) return; // Make sure to never try to generate when ur only one tick away from collision
 
         renderer.begin(event.getMatrixStack());
 
+        // Iterate through all the points and draw line segments between them
         for (int i = 0; i < points.size() - 1; i++) {
             Vec3 p1 = points.get(i);
             Vec3 p2 = points.get(i + 1);
             renderer.drawLine(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 0xffff0000);
         }
 
+        // If there is a collision, render a highlighted block at that location
         if (points.size() != limit) {
             BlockPos blockPos = BlockPos.containing(points.getLast());
             renderer.drawBox(blockPos, true, true, 0xffff0000);
@@ -109,4 +115,11 @@ public class ElytraPathTracerModule extends ToggleableModule {
         renderer.end();
 
     }
+
+    private int rainbow(int i, int total){
+        float h = (float)i/total;
+        int c = java.awt.Color.HSBtoRGB(h,1,1);
+        return 0xff000000 | (c & 0xffffff);
+    }
+
 }
