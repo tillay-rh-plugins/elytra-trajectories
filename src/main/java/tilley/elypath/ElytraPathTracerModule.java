@@ -74,12 +74,9 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		IRenderer3D renderer = event.getRenderer();
 		List<Vec3> points = getTravelPoints(event.getPartialTicks());
 
-		if (points.size() < 2) return; // Make sure to never try to generate when ur only one tick away from collision
+		if (points.size() < 2) return;
 
 		renderer.begin(event.getMatrixStack());
-
-		// If there is a collision, render a highlighted block at that location if we allow rendering
-		// destination block
 
 		BlockPos blockPos = BlockPos.containing(points.getLast());
 		boolean hasBlockCollision = !mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty();
@@ -121,12 +118,10 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
         if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return points;
 
+		Vec3 vel = mc.player.getDeltaMovement();
         Vec3 pos = mc.player.getPosition(partialTicks);
-        Vec3 vel = mc.player.getDeltaMovement();
         Vec3 lookAngle = mc.player.getLookAngle();
         float xRot = mc.player.getXRot();
-
-		pos.add(pos);
 
         while (true) {
             vel = updateFallFlyingMovement(vel, lookAngle, xRot);
@@ -146,19 +141,17 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	/* Trajectory Renderers	 */
 
     private void renderTrajectoryStatic(IRenderer3D renderer, List<Vec3> points) {
-        Vec3 prevPoint = null;
-        for (Vec3 point : points.reversed()) {
-            if (prevPoint != null) {
-                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z,
-                        trajectoryStaticColor.getValueRGB());
-            }
-            prevPoint = point;
+		int totalPoints = points.size();
+
+		for (int i = totalPoints - 1; i > 0; i--) {
+			Vec3 prevPoint = points.get(i - 1);
+			Vec3 point = points.get(i);
+
+			renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, trajectoryStaticColor.getValueRGB());
         }
     }
 
 	private void renderTrajectoryGradient(IRenderer3D renderer, List<Vec3> points) {
-		if (points.size() < 2) return;
-
 		int closeColor = trajectoryGradientCustomColors.getValue()
 				? trajectoryGradientStart.getValueRGB()
 				: getDistanceColor(DistanceColorType.CLOSE);
@@ -168,7 +161,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
 		int totalPoints = points.size();
 
-		for (int i = 1; i < totalPoints; i++) {
+		for (int i = totalPoints - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
 			Vec3 point = points.get(i);
 
@@ -264,6 +257,8 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	// and changed various things to make it work here and fit in with other features
 	// OG src at net.minecraft.world.entity.LivingEntity # updateFallFlyingMovement
 	private static Vec3 updateFallFlyingMovement(Vec3 vec3, Vec3 lookAngle, float xRot) {
+		if (mc.player == null) return null;
+
 		float f = xRot * ((float)Math.PI / 180F);
 		double d = Math.sqrt(lookAngle.x * lookAngle.x + lookAngle.z * lookAngle.z);
 		double e = vec3.horizontalDistance();
