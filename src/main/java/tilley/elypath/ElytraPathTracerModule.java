@@ -234,10 +234,10 @@ public class ElytraPathTracerModule extends ToggleableModule {
         }
     }
 
-    private void renderTrajectorySpeed(IRenderer3D renderer, List<Vec3> points) {
-        double min = 0, max = 80;
+	private void renderTrajectorySpeed(IRenderer3D renderer, List<Vec3> points) {
+		double min = 0, max = 80;
 
-		for (int i = 1; i < points.size(); i++) {
+		for (int i = points.size() - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
 			Vec3 point = points.get(i);
 
@@ -252,9 +252,9 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
 			renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, blendedColor);
 		}
-    }
+	}
 
-    /**
+	/**
      * @param idx Index in the point list.
      * @param total Size of the point list.
      * @return The resulting rainbow color.
