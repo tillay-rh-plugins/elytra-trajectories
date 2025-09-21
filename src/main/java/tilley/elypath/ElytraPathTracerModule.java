@@ -9,6 +9,7 @@ import org.rusherhack.client.api.feature.module.ModuleCategory;
 import org.rusherhack.client.api.feature.module.ToggleableModule;
 import org.rusherhack.client.api.render.IRenderer3D;
 import org.rusherhack.client.api.setting.ColorSetting;
+import org.rusherhack.client.api.system.Colors;
 import org.rusherhack.core.event.subscribe.Subscribe;
 import org.rusherhack.core.setting.*;
 import org.rusherhack.core.utils.ColorUtils;
@@ -199,30 +200,36 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
     private void renderTrajectoryRainbow(IRenderer3D renderer, List<Vec3> points) {
         int maxColors = points.size();
-        Vec3 prevPoint = null;
 
-        for (int i = 0; i < points.size(); i++) {
-            Vec3 point = points.get(i);
-            if (prevPoint != null) {
-                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z,
-                        getRainbow(i, maxColors));
-            }
-            prevPoint = point;
+        for (int i = 1; i < points.size(); i++) {
+			Vec3 prevPoint = points.get(i - 1);
+			Vec3 point = points.get(i);
+
+			renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z,
+					point.x, point.y, point.z,
+					getRainbow(i, maxColors));
         }
     }
 
     private void renderTrajectorySpeed(IRenderer3D renderer, List<Vec3> points) {
         double min = 0, max = 80;
-        Vec3 prevPoint = null;
-        for (Vec3 point : points) {
-            if (prevPoint != null) {
-                double d = point.distanceTo(prevPoint) * RusherHackAPI.getServerState().getTPS();
-                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, ColorUtils.blendColors(new int[]{getDistanceColor(DistanceColorType.CLOSE), getDistanceColor(DistanceColorType.FAR), 0xff00ffff}, (float) ((d - min) / (max - min))));
-            }
-            prevPoint = point;
-        }
-    }
 
+		for (int i = 1; i < points.size(); i++) {
+			Vec3 prevPoint = points.get(i - 1);
+			Vec3 point = points.get(i);
+
+			double distance = point.distanceTo(prevPoint) * RusherHackAPI.getServerState().getTPS();
+			float t = (float) ((distance - min) / (max - min));
+
+			int blendedColor = ColorUtils.blendColors(new int[]{
+					getDistanceColor(DistanceColorType.CLOSE),
+					getDistanceColor(DistanceColorType.FAR),
+					Color.cyan.getRGB()
+			}, t);
+
+			renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, blendedColor);
+		}
+    }
 
     /**
      * @param idx Index in the point list.
