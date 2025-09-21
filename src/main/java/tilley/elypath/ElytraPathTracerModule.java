@@ -4,17 +4,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.rusherhack.client.api.RusherHackAPI;
-import org.rusherhack.client.api.accessors.client.IMixinMinecraft;
 import org.rusherhack.client.api.events.render.EventRender3D;
 import org.rusherhack.client.api.feature.module.ModuleCategory;
 import org.rusherhack.client.api.feature.module.ToggleableModule;
 import org.rusherhack.client.api.render.IRenderer3D;
 import org.rusherhack.client.api.setting.ColorSetting;
 import org.rusherhack.core.event.subscribe.Subscribe;
-import org.rusherhack.core.setting.BooleanSetting;
-import org.rusherhack.core.setting.EnumSetting;
-import org.rusherhack.core.setting.NullSetting;
-import org.rusherhack.core.setting.NumberSetting;
+import org.rusherhack.core.setting.*;
 import org.rusherhack.core.utils.ColorUtils;
 
 import java.awt.*;
@@ -191,8 +187,8 @@ public class ElytraPathTracerModule extends ToggleableModule {
         for (Vec3 point : points) {
             if (prevPoint != null) { // koteyka what the heck is going on here please make it distance from player based not this gooberness
                 int color = ColorUtils.interpolateColor(
-                        trajectoryGradientCustomColors.getValue() ? trajectoryGradientStart.getValueRGB() : getDistCloseColor(),
-                        trajectoryGradientCustomColors.getValue() ? trajectoryGradientEnd.getValueRGB() : getDistFarColor(), factor);
+                        trajectoryGradientCustomColors.getValue() ? trajectoryGradientStart.getValueRGB() : getDistanceColor(DistanceColorType.CLOSE),
+                        trajectoryGradientCustomColors.getValue() ? trajectoryGradientEnd.getValueRGB() : getDistanceColor(DistanceColorType.FAR), factor);
                 renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, color);
                 factor += stepFactor;
                 if (factor > 1) factor = 1;
@@ -221,7 +217,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
         for (Vec3 point : points) {
             if (prevPoint != null) {
                 double d = point.distanceTo(prevPoint) * RusherHackAPI.getServerState().getTPS();
-                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, ColorUtils.blendColors(new int[]{getDistCloseColor(), getDistFarColor(), 0xff00ffff}, (float) ((d - min) / (max - min))));
+                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, ColorUtils.blendColors(new int[]{getDistanceColor(DistanceColorType.CLOSE), getDistanceColor(DistanceColorType.FAR), 0xff00ffff}, (float) ((d - min) / (max - min))));
             }
             prevPoint = point;
         }
@@ -231,7 +227,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
     /**
      * @param idx Index in the point list.
      * @param total Size of the point list.
-     * @return
+     * @return The resulting rainbow color.
      */
     private int getRainbow(int idx, int total) {
         float h = (float) idx / total;
@@ -240,29 +236,30 @@ public class ElytraPathTracerModule extends ToggleableModule {
         return 0xff000000 | (c & 0xffffff);
     }
 
-    /**
-     * @return Colors->DistanceColors->Far->value
-     */
-    private int getDistFarColor() {
-        var obj = RusherHackAPI.getModuleManager().getFeature("Colors");
-        if (obj.isPresent()) {
-            var farColor = (ColorSetting)obj.get().getSetting("Distance Colors").getSubSetting("Far");
-            return farColor.getValueRGB();
-        }
+	private enum DistanceColorType {
+		CLOSE,
+		FAR
+	}
 
-        return 0xff00ff00; // just in case we SOMEHOW fail, we return the default color.
-    }
+	/**
+	 * @return Colors -> Distance Colors -> Close / Far
+	 */
+	private int getDistanceColor(DistanceColorType type) {
+		int defaultColor = type == DistanceColorType.CLOSE ? Color.RED.getRGB() : Color.GREEN.getRGB();
 
-    /**
-     * @return Colors->DistanceColors->Far->value
-     */
-    public static int getDistCloseColor() {
-        var obj = RusherHackAPI.getModuleManager().getFeature("Colors");
-        if (obj.isPresent()) {
-            var theSecondObj = (ColorSetting)obj.get().getSetting("Distance Colors").getSubSetting("Close");
-            return theSecondObj.getValueRGB();
-        }
+		var distanceColors = getDistanceColorsSetting();
+		if (distanceColors == null) return defaultColor;
 
-        return 0xffff0000; // just in case we SOMEHOW fail, we return the default color.
-    }
+		var colorSetting = distanceColors.getSubSetting(type == DistanceColorType.CLOSE ? "Close" : "Far");
+		if (!(colorSetting instanceof ColorSetting cs)) return defaultColor;
+
+		return cs.getValueRGB();
+	}
+
+	private Setting<?> getDistanceColorsSetting() {
+		return RusherHackAPI.getModuleManager()
+				.getFeature("Colors")
+				.map(module -> module.getSetting("Distance Colors"))
+				.orElse(null);
+	}
 }
