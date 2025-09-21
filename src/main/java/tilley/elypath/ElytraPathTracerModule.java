@@ -270,7 +270,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		boolean isGoingUp = mc.player.getDeltaMovement().y <= (double)0.0F;
 		double g = isGoingUp && mc.player.hasEffect(MobEffects.SLOW_FALLING) ? Math.min(mc.player.getGravity(), 0.01) : mc.player.getGravity();
 		double h = Mth.square(Math.cos(f));
-		vec3 = vec3.add((double)0.0F, g * ((double)-1.0F + h * (double)0.75F), (double)0.0F);
+		vec3 = vec3.add(0.0F, g * ((double)-1.0F + h * (double)0.75F), 0.0F);
 		if (vec3.y < (double)0.0F && d > (double)0.0F) {
 			double i = vec3.y * -0.1 * h;
 			vec3 = vec3.add(lookAngle.x * i / d, i, lookAngle.z * i / d);
@@ -282,9 +282,9 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		}
 
 		if (d > (double)0.0F) {
-			vec3 = vec3.add((lookAngle.x / d * e - vec3.x) * 0.1, (double)0.0F, (lookAngle.z / d * e - vec3.z) * 0.1);
+			vec3 = vec3.add((lookAngle.x / d * e - vec3.x) * 0.1, 0.0F, (lookAngle.z / d * e - vec3.z) * 0.1);
 		}
 
-		return vec3.multiply((double)0.99F, (double)0.98F, (double)0.99F);
+		return vec3.multiply(0.99F, 0.98F, 0.99F);
 	}
 }
