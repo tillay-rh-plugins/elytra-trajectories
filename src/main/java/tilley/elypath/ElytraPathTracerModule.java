@@ -4,6 +4,8 @@ import net.minecraft.BlockUtil;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
@@ -63,74 +65,18 @@ public class ElytraPathTracerModule extends ToggleableModule {
         renderDestination.addSubSettings(destinationFill,destinationOutline,destinationDynamicColor,destinationLineWidth,destinationDepthTest,destinationColor,destinationAlpha);
         renderingSettings.addSubSettings(trajectorySettings,renderDestination);
         this.registerSettings(renderingSettings);
-
     }
 
-    private List<Vec3> getTravelPoints(float partialTicks) {
-        if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return new ArrayList<>();
+	@Subscribe
+	private void onRender3D(EventRender3D event) {
+		if (mc.player == null || !mc.player.isFallFlying() || mc.level == null) return;
 
-        List<Vec3> points = new ArrayList<>();
-        Vec3 pos = mc.player.getPosition(partialTicks);
-        Vec3 vel = mc.player.getDeltaMovement();
-        Vec3 lookAngle = mc.player.getLookAngle();
-        float xRot = mc.player.getXRot();
+		IRenderer3D renderer = event.getRenderer();
+		List<Vec3> points = getTravelPoints(event.getPartialTicks());
 
-        while (true) {
-            vel = updateFallFlyingMovement(vel, lookAngle, xRot);
-            pos = pos.add(vel);
+		if (points.size() < 2) return; // Make sure to never try to generate when ur only one tick away from collision
 
-			BlockPos blockPos = BlockPos.containing(pos);
-			if (!mc.level.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(blockPos.getX()), SectionPos.blockToSectionCoord(blockPos.getZ()))) break;
-			if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) {
-				points.add(pos);
-				break;
-			}
-
-			points.add(pos);
-        }
-        return points;
-    }
-
-
-    // skidded asf
-    // I may or may not have no idea how this works, I just copied mc source code
-    // and changed various things to make it work here and fit in with other features
-    // OG src at net.minecraft.world.entity.LivingEntity # updateFallFlyingMovement
-    private Vec3 updateFallFlyingMovement(Vec3 vec3, Vec3 lookAngle, float xRot) {
-        float f = xRot * ((float)Math.PI / 180F);
-        double d = Math.sqrt(lookAngle.x * lookAngle.x + lookAngle.z * lookAngle.z);
-        double e = vec3.horizontalDistance();
-        double h = Mth.square(Math.cos(f));
-
-        vec3 = vec3.add(0.0, 0.08 * (-1.0 + h * 0.75), 0.0);
-
-        if (vec3.y < 0.0 && d > 0.0) {
-            double i = vec3.y * -0.1 * h;
-            vec3 = vec3.add(lookAngle.x * i / d, i, lookAngle.z * i / d);
-        }
-
-        if (f < 0.0F && d > 0.0) {
-            double i = e * (-Mth.sin(f)) * 0.04;
-            vec3 = vec3.add(-lookAngle.x * i / d, i * 3.2, -lookAngle.z * i / d);
-        }
-
-        if (d > 0.0) {
-            vec3 = vec3.add((lookAngle.x / d * e - vec3.x) * 0.1, 0.0, (lookAngle.z / d * e - vec3.z) * 0.1);
-        }
-
-        return vec3.multiply(0.99, 0.98, 0.99);
-    }
-
-    @Subscribe
-    private void onRender3D(EventRender3D event) {
-        if (mc.player == null || !mc.player.isFallFlying() || mc.level == null) return;
-
-        IRenderer3D renderer = event.getRenderer();
-        List<Vec3> points = getTravelPoints(event.getPartialTicks());
-
-        if (points.size() < 2) return; // Make sure to never try to generate when ur only one tick away from collision
-
-        renderer.begin(event.getMatrixStack());
+		renderer.begin(event.getMatrixStack());
 
 		// If there is a collision, render a highlighted block at that location if we allow rendering
 		// destination block
@@ -160,21 +106,48 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		renderer.setLineWidth(trajectoryLineWidth.getValue());
 		renderer.setDepthTest(trajectoryDepthTest.getValue());
 
-        switch (trajectoryColorMode.getValue()) {
-            case STATIC -> renderTrajectoryStatic(renderer, points);
-            case GRADIENT -> renderTrajectoryGradient(renderer, points);
-            case RAINBOW -> renderTrajectoryRainbow(renderer, points);
-            case SPEED -> renderTrajectorySpeed(renderer, points);
+		switch (trajectoryColorMode.getValue()) {
+			case STATIC -> renderTrajectoryStatic(renderer, points);
+			case GRADIENT -> renderTrajectoryGradient(renderer, points);
+			case RAINBOW -> renderTrajectoryRainbow(renderer, points);
+			case SPEED -> renderTrajectorySpeed(renderer, points);
+		}
+
+		renderer.end();
+	}
+
+    private List<Vec3> getTravelPoints(float partialTicks) {
+		List<Vec3> points = new ArrayList<>();
+
+        if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return points;
+
+        Vec3 pos = mc.player.getPosition(partialTicks);
+        Vec3 vel = mc.player.getDeltaMovement();
+        Vec3 lookAngle = mc.player.getLookAngle();
+        float xRot = mc.player.getXRot();
+
+		pos.add(pos);
+
+        while (true) {
+            vel = updateFallFlyingMovement(vel, lookAngle, xRot);
+            pos = pos.add(vel);
+
+			BlockPos blockPos = BlockPos.containing(pos);
+			if (!mc.level.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(blockPos.getX()), SectionPos.blockToSectionCoord(blockPos.getZ()))) break;
+
+			points.add(pos);
+
+			if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) break;
         }
 
-
-        renderer.end();
+        return points;
     }
 
+	/* Trajectory Renderers	 */
+
     private void renderTrajectoryStatic(IRenderer3D renderer, List<Vec3> points) {
-        // Iterate through all the points and draw line segments between them
         Vec3 prevPoint = null;
-        for (Vec3 point : points) {
+        for (Vec3 point : points.reversed()) {
             if (prevPoint != null) {
                 renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z,
                         trajectoryStaticColor.getValueRGB());
@@ -246,6 +219,8 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		}
 	}
 
+	/* Utils */
+
 	/**
      * @param idx Index in the point list.
      * @param total Size of the point list.
@@ -282,5 +257,34 @@ public class ElytraPathTracerModule extends ToggleableModule {
 				.getFeature("Colors")
 				.map(module -> module.getSetting("Distance Colors"))
 				.orElse(null);
+	}
+
+	// skidded asf
+	// I may or may not have no idea how this works, I just copied mc source code
+	// and changed various things to make it work here and fit in with other features
+	// OG src at net.minecraft.world.entity.LivingEntity # updateFallFlyingMovement
+	private static Vec3 updateFallFlyingMovement(Vec3 vec3, Vec3 lookAngle, float xRot) {
+		float f = xRot * ((float)Math.PI / 180F);
+		double d = Math.sqrt(lookAngle.x * lookAngle.x + lookAngle.z * lookAngle.z);
+		double e = vec3.horizontalDistance();
+		boolean isGoingUp = mc.player.getDeltaMovement().y <= (double)0.0F;
+		double g = isGoingUp && mc.player.hasEffect(MobEffects.SLOW_FALLING) ? Math.min(mc.player.getGravity(), 0.01) : mc.player.getGravity();
+		double h = Mth.square(Math.cos(f));
+		vec3 = vec3.add((double)0.0F, g * ((double)-1.0F + h * (double)0.75F), (double)0.0F);
+		if (vec3.y < (double)0.0F && d > (double)0.0F) {
+			double i = vec3.y * -0.1 * h;
+			vec3 = vec3.add(lookAngle.x * i / d, i, lookAngle.z * i / d);
+		}
+
+		if (f < 0.0F && d > (double)0.0F) {
+			double i = e * (double)(-Mth.sin(f)) * 0.04;
+			vec3 = vec3.add(-lookAngle.x * i / d, i * 3.2, -lookAngle.z * i / d);
+		}
+
+		if (d > (double)0.0F) {
+			vec3 = vec3.add((lookAngle.x / d * e - vec3.x) * 0.1, (double)0.0F, (lookAngle.z / d * e - vec3.z) * 0.1);
+		}
+
+		return vec3.multiply((double)0.99F, (double)0.98F, (double)0.99F);
 	}
 }
