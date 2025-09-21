@@ -1,7 +1,11 @@
 package tilley.elypath;
 
+import net.minecraft.BlockUtil;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
 import org.rusherhack.client.api.RusherHackAPI;
 import org.rusherhack.client.api.events.render.EventRender3D;
@@ -27,8 +31,6 @@ public class ElytraPathTracerModule extends ToggleableModule {
     }
 
     // All Hail The Java
-    private final NumberSetting<Float> predictTicks = new NumberSetting<>("PredictionTicks", 2000f, 1f, 2000f).incremental(1f);
-
     private final NullSetting renderingSettings = new NullSetting("Rendering");
     private final NullSetting trajectorySettings = new NullSetting("Trajectory");
     private final BooleanSetting renderDestination = new BooleanSetting("Destination", true);
@@ -56,46 +58,37 @@ public class ElytraPathTracerModule extends ToggleableModule {
     public ElytraPathTracerModule() {
         super("ElytraTrajectories", "Render a trajectory to predict where player will be going with elytra", ModuleCategory.RENDER);
 
-        predictTicks.setDescription("Amount of ticks into the future to render trajectory");
-
         trajectoryColor.addSubSettings(trajectoryColorMode,trajectoryStaticColor,trajectoryGradientCustomColors,trajectoryGradientStart,trajectoryGradientEnd,trajectoryRainbowBrightness,trajectoryRainbowSaturation);
         trajectorySettings.addSubSettings(trajectoryLineWidth,trajectoryDepthTest,trajectoryColor);
         renderDestination.addSubSettings(destinationFill,destinationOutline,destinationDynamicColor,destinationLineWidth,destinationDepthTest,destinationColor,destinationAlpha);
         renderingSettings.addSubSettings(trajectorySettings,renderDestination);
-        this.registerSettings(predictTicks,renderingSettings);
+        this.registerSettings(renderingSettings);
 
     }
 
-    // Return all the points the user will be at up to limit ticks in the future
-    private List<Vec3> getTravelPoints(int limit, float partialTicks) {
-        if (mc.player == null || !mc.player.isFallFlying()) return new ArrayList<>();
+    private List<Vec3> getTravelPoints(float partialTicks) {
+        if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return new ArrayList<>();
 
-        List<Vec3> points = new ArrayList<>(limit);
+        List<Vec3> points = new ArrayList<>();
         Vec3 pos = mc.player.getPosition(partialTicks);
         Vec3 vel = mc.player.getDeltaMovement();
         Vec3 lookAngle = mc.player.getLookAngle();
         float xRot = mc.player.getXRot();
 
-        for (int i = 0; i < limit; i++) {
+        while (true) {
             vel = updateFallFlyingMovement(vel, lookAngle, xRot);
             pos = pos.add(vel);
-            points.add(pos);
+
+			BlockPos blockPos = BlockPos.containing(pos);
+			if (!mc.level.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(blockPos.getX()), SectionPos.blockToSectionCoord(blockPos.getZ()))) break;
+			if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) {
+				points.add(pos);
+				break;
+			}
+
+			points.add(pos);
         }
         return points;
-    }
-
-    // Take in a list of points that user will go through without accounting for blocks
-    // This returns a new list that only has points leading up to collision with a block
-    private List<Vec3> cutOffAfterCollision(List<Vec3> points) {
-        List<Vec3> newPoints = new ArrayList<>();
-        for (Vec3 point : points) {
-            newPoints.add(point);
-            BlockPos blockPos = BlockPos.containing(point);
-            if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) {
-                break;
-            }
-        }
-        return newPoints;
     }
 
 
@@ -133,10 +126,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
         if (mc.player == null || !mc.player.isFallFlying() || mc.level == null) return;
 
         IRenderer3D renderer = event.getRenderer();
-        int limit = Math.round(predictTicks.getValue()); // Maximum number of segments to make to avoid lag
-        List<Vec3> points = cutOffAfterCollision(getTravelPoints(limit, event.getPartialTicks())); // Get a list of point objects to generate segments between
-
-        // ChatUtils.print(new DecimalFormat("0.000").format(points.size() / RusherHackAPI.getServerState().getTPS()) + " seconds until impact.");
+        List<Vec3> points = getTravelPoints(event.getPartialTicks());
 
         if (points.size() < 2) return; // Make sure to never try to generate when ur only one tick away from collision
 
@@ -144,10 +134,12 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
 		// If there is a collision, render a highlighted block at that location if we allow rendering
 		// destination block
-		if (renderDestination.getValue() && points.size() != limit) {
+
+		BlockPos blockPos = BlockPos.containing(points.getLast());
+		boolean hasBlockCollision = !mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty();
+		if (renderDestination.getValue() && hasBlockCollision) {
 			renderer.setLineWidth(destinationLineWidth.getValue());
 			renderer.setDepthTest(destinationDepthTest.getValue());
-			BlockPos blockPos = BlockPos.containing(points.getLast());
 			if (destinationDynamicColor.getValue()) {
 				int closeColor = trajectoryGradientCustomColors.getValue()
 						? trajectoryGradientStart.getValueRGB()
@@ -224,7 +216,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	private void renderTrajectoryRainbow(IRenderer3D renderer, List<Vec3> points) {
         int maxColors = points.size();
 
-        for (int i = 1; i < points.size(); i++) {
+		for (int i = points.size() - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
 			Vec3 point = points.get(i);
 
