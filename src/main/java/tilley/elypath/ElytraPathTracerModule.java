@@ -3,27 +3,69 @@ package tilley.elypath;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
+import org.rusherhack.client.api.RusherHackAPI;
+import org.rusherhack.client.api.accessors.client.IMixinMinecraft;
 import org.rusherhack.client.api.events.render.EventRender3D;
 import org.rusherhack.client.api.feature.module.ModuleCategory;
 import org.rusherhack.client.api.feature.module.ToggleableModule;
 import org.rusherhack.client.api.render.IRenderer3D;
+import org.rusherhack.client.api.setting.ColorSetting;
 import org.rusherhack.core.event.subscribe.Subscribe;
+import org.rusherhack.core.setting.BooleanSetting;
+import org.rusherhack.core.setting.EnumSetting;
+import org.rusherhack.core.setting.NullSetting;
 import org.rusherhack.core.setting.NumberSetting;
+import org.rusherhack.core.utils.ColorUtils;
 
+import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 
 public class ElytraPathTracerModule extends ToggleableModule {
 
+    public enum ColorMode {
+        STATIC,
+        GRADIENT,
+        RAINBOW,
+        SPEED
+    }
 
-    final NumberSetting<Float> predictTicks = new NumberSetting<>("PredictTicks", 2000f, 1f, 2000f).incremental(1f);
+    // All Hail The Java
+    private final NumberSetting<Float> predictTicks = new NumberSetting<>("PredictionTicks", 2000f, 1f, 2000f).incremental(1f);
+
+    private final NullSetting renderingSettings = new NullSetting("Rendering");
+    private final NullSetting trajectorySettings = new NullSetting("Trajectory");
+    private final BooleanSetting renderDestination = new BooleanSetting("Destination", true);
+
+    private final EnumSetting<ColorMode> trajectoryColorMode = new EnumSetting<>("Mode", ColorMode.STATIC);
+    private final NumberSetting<Float> trajectoryLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f);
+    private final BooleanSetting trajectoryDepthTest = new BooleanSetting("DepthTest", false);
+    private final NullSetting trajectoryColor = new NullSetting("Color");
+    private final ColorSetting trajectoryStaticColor = new ColorSetting("Value", new Color(0x915ff0)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.STATIC);
+    private final BooleanSetting trajectoryGradientCustomColors = new BooleanSetting("CustomColors", false).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT);
+    private final ColorSetting trajectoryGradientStart = new ColorSetting("Start", new Color(0x004fff)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT && trajectoryGradientCustomColors.getValue());
+    private final ColorSetting trajectoryGradientEnd = new ColorSetting("End", new Color(0x00ffff)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT && trajectoryGradientCustomColors.getValue());
+    private final NumberSetting<Float> trajectoryRainbowSaturation = new NumberSetting<>("Saturation", 0.78f, 0.0f, 1.0f).incremental(0.01f).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.RAINBOW);
+    private final NumberSetting<Float> trajectoryRainbowBrightness = new NumberSetting<>("Brightness", 1.0f, 0.0f, 1.0f).incremental(0.01f).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.RAINBOW);
+
+    private final BooleanSetting destinationFill = new BooleanSetting("Fill", true);
+    private final BooleanSetting destinationOutline = new BooleanSetting("Outline", true);
+
+    private final NumberSetting<Float> destinationLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f);
+    private final BooleanSetting destinationDepthTest = new BooleanSetting("DepthTest", false);
+    private final ColorSetting destinationColor = new ColorSetting("Color", new Color(0x3a915ff0, true));
 
     public ElytraPathTracerModule() {
         super("ElytraTrajectories", "Render a trajectory to predict where player will be going with elytra", ModuleCategory.RENDER);
 
         predictTicks.setDescription("Amount of ticks into the future to render trajectory");
 
-        this.registerSettings(predictTicks);
+        trajectoryColor.addSubSettings(trajectoryColorMode,trajectoryStaticColor,trajectoryGradientCustomColors,trajectoryGradientStart,trajectoryGradientEnd,trajectoryRainbowBrightness,trajectoryRainbowSaturation);
+        trajectorySettings.addSubSettings(trajectoryLineWidth,trajectoryDepthTest,trajectoryColor);
+        renderDestination.addSubSettings(destinationFill,destinationOutline,destinationLineWidth,destinationDepthTest,destinationColor);
+        renderingSettings.addSubSettings(trajectorySettings,renderDestination);
+        this.registerSettings(predictTicks,renderingSettings);
+
     }
 
     // Return all the points the user will be at up to limit ticks in the future
@@ -62,6 +104,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
     // skidded asf
     // I may or may not have no idea how this works, I just copied mc source code
     // and changed various things to make it work here and fit in with other features
+    // OG src at net.minecraft.world.entity.LivingEntity # updateFallFlyingMovement
     private Vec3 updateFallFlyingMovement(Vec3 vec3, Vec3 lookAngle, float xRot) {
         float f = xRot * ((float)Math.PI / 180F);
         double d = Math.sqrt(lookAngle.x * lookAngle.x + lookAngle.z * lookAngle.z);
@@ -95,31 +138,131 @@ public class ElytraPathTracerModule extends ToggleableModule {
         int limit = Math.round(predictTicks.getValue()); // Maximum number of segments to make to avoid lag
         List<Vec3> points = cutOffAfterCollision(getTravelPoints(limit)); // Get a list of point objects to generate segments between
 
+        // ChatUtils.print(new DecimalFormat("0.000").format(points.size() / RusherHackAPI.getServerState().getTPS()) + " seconds until impact.");
+
         if (points.size() < 2) return; // Make sure to never try to generate when ur only one tick away from collision
 
         renderer.begin(event.getMatrixStack());
 
-        // Iterate through all the points and draw line segments between them
-        for (int i = 0; i < points.size() - 1; i++) {
-            Vec3 p1 = points.get(i);
-            Vec3 p2 = points.get(i + 1);
-            renderer.drawLine(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 0xffff0000);
-        }
+        renderer.setLineWidth(trajectoryLineWidth.getValue());
+        renderer.setDepthTest(trajectoryDepthTest.getValue());
 
-        // If there is a collision, render a highlighted block at that location
-        if (points.size() != limit) {
-            BlockPos blockPos = BlockPos.containing(points.getLast());
-            renderer.drawBox(blockPos, true, true, 0xffff0000);
+        switch (trajectoryColorMode.getValue()) {
+            case STATIC -> renderTrajectoryStatic(renderer, points);
+            case GRADIENT -> renderTrajectoryGradient(renderer, points);
+            case RAINBOW -> renderTrajectoryRainbow(renderer, points);
+            case SPEED -> renderTrajectorySpeed(renderer, points);
         }
 
         renderer.end();
 
+        renderer.begin(event.getMatrixStack());
+
+        // If there is a collision, render a highlighted block at that location if we allow rendering
+        // destination block
+        if (renderDestination.getValue() && points.size() != limit) {
+            renderer.setLineWidth(destinationLineWidth.getValue());
+            renderer.setDepthTest(destinationDepthTest.getValue());
+            BlockPos blockPos = BlockPos.containing(points.getLast());
+            renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(),
+                    destinationColor.getValueRGB());
+        }
+
+        renderer.end();
     }
 
-    private int rainbow(int i, int total){
-        float h = (float)i/total;
-        int c = java.awt.Color.HSBtoRGB(h,1,1);
+    private void renderTrajectoryStatic(IRenderer3D renderer, List<Vec3> points) {
+        // Iterate through all the points and draw line segments between them
+        Vec3 prevPoint = null;
+        for (Vec3 point : points) {
+            if (prevPoint != null) {
+                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z,
+                        trajectoryStaticColor.getValueRGB());
+            }
+            prevPoint = point;
+        }
+    }
+
+    private void renderTrajectoryGradient(IRenderer3D renderer, List<Vec3> points) {
+        final double stepFactor = 3d / points.size(); // Amplify the gradient so that it does not look bad from first
+        // prt
+        double factor = 0;
+        Vec3 prevPoint = null;
+        for (Vec3 point : points) {
+            if (prevPoint != null) { // koteyka what the heck is going on here please make it distance from player based not this gooberness
+                int color = ColorUtils.interpolateColor(
+                        trajectoryGradientCustomColors.getValue() ? trajectoryGradientStart.getValueRGB() : getDistCloseColor(),
+                        trajectoryGradientCustomColors.getValue() ? trajectoryGradientEnd.getValueRGB() : getDistFarColor(), factor);
+                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, color);
+                factor += stepFactor;
+                if (factor > 1) factor = 1;
+            }
+            prevPoint = point;
+        }
+    }
+
+    private void renderTrajectoryRainbow(IRenderer3D renderer, List<Vec3> points) {
+        int maxColors = points.size();
+        Vec3 prevPoint = null;
+
+        for (int i = 0; i < points.size(); i++) {
+            Vec3 point = points.get(i);
+            if (prevPoint != null) {
+                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z,
+                        getRainbow(i, maxColors));
+            }
+            prevPoint = point;
+        }
+    }
+
+    private void renderTrajectorySpeed(IRenderer3D renderer, List<Vec3> points) {
+        double min = 0, max = 80;
+        Vec3 prevPoint = null;
+        for (Vec3 point : points) {
+            if (prevPoint != null) {
+                double d = point.distanceTo(prevPoint) * RusherHackAPI.getServerState().getTPS();
+                renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z, point.x, point.y, point.z, ColorUtils.blendColors(new int[]{getDistCloseColor(), getDistFarColor(), 0xff00ffff}, (float) ((d - min) / (max - min))));
+            }
+            prevPoint = point;
+        }
+    }
+
+
+    /**
+     * @param idx Index in the point list.
+     * @param total Size of the point list.
+     * @return
+     */
+    private int getRainbow(int idx, int total) {
+        float h = (float) idx / total;
+        int c = Color.HSBtoRGB(h ,trajectoryRainbowSaturation.getValue(),
+                trajectoryRainbowBrightness.getValue());
         return 0xff000000 | (c & 0xffffff);
     }
 
+    /**
+     * @return Colors->DistanceColors->Far->value
+     */
+    private int getDistFarColor() {
+        var obj = RusherHackAPI.getModuleManager().getFeature("Colors");
+        if (obj.isPresent()) {
+            var farColor = (ColorSetting)obj.get().getSetting("Distance Colors").getSubSetting("Far");
+            return farColor.getValueRGB();
+        }
+
+        return 0xff00ff00; // just in case we SOMEHOW fail, we return the default color.
+    }
+
+    /**
+     * @return Colors->DistanceColors->Far->value
+     */
+    public static int getDistCloseColor() {
+        var obj = RusherHackAPI.getModuleManager().getFeature("Colors");
+        if (obj.isPresent()) {
+            var theSecondObj = (ColorSetting)obj.get().getSetting("Distance Colors").getSubSetting("Close");
+            return theSecondObj.getValueRGB();
+        }
+
+        return 0xffff0000; // just in case we SOMEHOW fail, we return the default color.
+    }
 }
