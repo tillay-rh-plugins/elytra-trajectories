@@ -230,10 +230,9 @@ public class ElytraPathTracerModule extends ToggleableModule {
      * @return The resulting rainbow color.
      */
     private int getRainbow(int idx, int total) {
-        float h = (float) idx / total;
-        int c = Color.HSBtoRGB(h ,trajectoryRainbowSaturation.getValue(),
-                trajectoryRainbowBrightness.getValue());
-        return 0xff000000 | (c & 0xffffff);
+        float hue = (float) idx / total;
+        int rgb = Color.HSBtoRGB(hue ,trajectoryRainbowSaturation.getValue(), trajectoryRainbowBrightness.getValue());
+		return ColorUtils.transparency(rgb, 255);
     }
 
 	private enum DistanceColorType {
@@ -244,7 +243,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	/**
 	 * @return Colors -> Distance Colors -> Close / Far
 	 */
-	private int getDistanceColor(DistanceColorType type) {
+	private static int getDistanceColor(DistanceColorType type) {
 		int defaultColor = type == DistanceColorType.CLOSE ? Color.RED.getRGB() : Color.GREEN.getRGB();
 
 		var distanceColors = getDistanceColorsSetting();
@@ -256,7 +255,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		return cs.getValueRGB();
 	}
 
-	private Setting<?> getDistanceColorsSetting() {
+	private static Setting<?> getDistanceColorsSetting() {
 		return RusherHackAPI.getModuleManager()
 				.getFeature("Colors")
 				.map(module -> module.getSetting("Distance Colors"))
