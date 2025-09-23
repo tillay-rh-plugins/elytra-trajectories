@@ -33,21 +33,21 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	private final BooleanSetting trajectoryGradientCustomColors = new BooleanSetting("CustomColors", false).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT);
 	private final ColorSetting trajectoryGradientStart = new ColorSetting("Start", new Color(0x004fff)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT && trajectoryGradientCustomColors.getValue());
 	private final ColorSetting trajectoryGradientEnd = new ColorSetting("End", new Color(0x00ffff)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT && trajectoryGradientCustomColors.getValue());
-	private final NumberSetting<Float> trajectoryRainbowSaturation = new NumberSetting<>("Saturation", 0.78f, 0.0f, 1.0f).incremental(0.01f).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.RAINBOW);
-	private final NumberSetting<Float> trajectoryRainbowBrightness = new NumberSetting<>("Brightness", 1.0f, 0.0f, 1.0f).incremental(0.01f).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.RAINBOW);
 	private final BooleanSetting destinationFill = new BooleanSetting("Fill", true);
 	private final BooleanSetting destinationOutline = new BooleanSetting("Outline", true);
 	private final BooleanSetting destinationDynamicColor = new BooleanSetting("DynamicColor", false);
+	private final NumberSetting<Float> tillImpactSeconds = new NumberSetting<>("BeforeImpact", 2.5f, 0.05f, 10.0f).incremental(0.1f).setVisibility(destinationDynamicColor::getValue);
 	private final NumberSetting<Float> destinationLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f);
 	private final BooleanSetting destinationDepthTest = new BooleanSetting("DepthTest", false);
 	private final ColorSetting destinationColor = new ColorSetting("Color", new Color(0x3a915ff0, false));
 	private final NumberSetting<Integer> destinationAlpha = new NumberSetting<>("Alpha", 150, 0, 255).incremental(1);
+
 	public ElytraPathTracerModule() {
 		super("ElytraTrajectories", "Render a trajectory to predict where player will be going with elytra", ModuleCategory.RENDER);
 
-		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors, trajectoryGradientStart, trajectoryGradientEnd, trajectoryRainbowBrightness, trajectoryRainbowSaturation);
+		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors, trajectoryGradientStart, trajectoryGradientEnd);
 		trajectorySettings.addSubSettings(trajectoryLineWidth, trajectoryDepthTest, trajectoryColor);
-		renderDestination.addSubSettings(destinationFill, destinationOutline, destinationDynamicColor, destinationLineWidth, destinationDepthTest, destinationColor, destinationAlpha);
+		renderDestination.addSubSettings(destinationFill, destinationOutline, destinationDynamicColor, tillImpactSeconds,destinationLineWidth, destinationDepthTest, destinationColor, destinationAlpha);
 		renderingSettings.addSubSettings(trajectorySettings, renderDestination);
 		this.registerSettings(renderingSettings);
 	}
@@ -124,16 +124,10 @@ public class ElytraPathTracerModule extends ToggleableModule {
 			renderer.setLineWidth(destinationLineWidth.getValue());
 			renderer.setDepthTest(destinationDepthTest.getValue());
 			if (destinationDynamicColor.getValue()) {
-				int closeColor = trajectoryGradientCustomColors.getValue()
-						? trajectoryGradientStart.getValueRGB()
-						: getDistanceColor(DistanceColorType.CLOSE);
-				int farColor = trajectoryGradientCustomColors.getValue()
-						? trajectoryGradientEnd.getValueRGB()
-						: getDistanceColor(DistanceColorType.FAR);
-				if (points.size() > 20) {
-					renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(farColor, destinationAlpha.getValue()));
+				if (points.size() > tillImpactSeconds.getValue() / RusherHackAPI.getServerState().getTPS()) {
+					renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(getDistanceColor(DistanceColorType.FAR), destinationAlpha.getValue()));
 				} else {
-					renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(closeColor, destinationAlpha.getValue()));
+					renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(getDistanceColor(DistanceColorType.CLOSE), destinationAlpha.getValue()));
 				}
 			} else {
 				renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(destinationColor.getValueRGB(), destinationAlpha.getValue()));
@@ -180,9 +174,8 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	}
 
 	private void renderTrajectoryStatic(IRenderer3D renderer, List<Vec3> points) {
-		int totalPoints = points.size();
 
-		for (int i = totalPoints - 1; i > 0; i--) {
+		for (int i = points.size() - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
 			Vec3 point = points.get(i);
 
@@ -191,16 +184,10 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	}
 
 	private void renderTrajectoryGradient(IRenderer3D renderer, List<Vec3> points) {
-		int closeColor = trajectoryGradientCustomColors.getValue()
-				? trajectoryGradientStart.getValueRGB()
-				: getDistanceColor(DistanceColorType.CLOSE);
-		int farColor = trajectoryGradientCustomColors.getValue()
-				? trajectoryGradientEnd.getValueRGB()
-				: getDistanceColor(DistanceColorType.FAR);
+		int closeColor = trajectoryGradientCustomColors.getValue() ? trajectoryGradientStart.getValueRGB() : getDistanceColor(DistanceColorType.CLOSE);
+		int farColor = trajectoryGradientCustomColors.getValue() ? trajectoryGradientEnd.getValueRGB() : getDistanceColor(DistanceColorType.FAR);
 
-		int totalPoints = points.size();
-
-		for (int i = totalPoints - 1; i > 0; i--) {
+		for (int i = points.size() - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
 			Vec3 point = points.get(i);
 
@@ -221,7 +208,6 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	/* Utils */
 
 	private void renderTrajectoryRainbow(IRenderer3D renderer, List<Vec3> points) {
-		int maxColors = points.size();
 
 		for (int i = points.size() - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
@@ -229,7 +215,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
 			renderer.drawLine(prevPoint.x, prevPoint.y, prevPoint.z,
 					point.x, point.y, point.z,
-					getRainbow(i, maxColors));
+					getRainbow(i, points.size()));
 		}
 	}
 
@@ -260,7 +246,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	 */
 	private int getRainbow(int idx, int total) {
 		float hue = (float) idx / total;
-		int rgb = Color.HSBtoRGB(hue, trajectoryRainbowSaturation.getValue(), trajectoryRainbowBrightness.getValue());
+		int rgb = Color.HSBtoRGB(hue, 0.8F,1);
 		return ColorUtils.transparency(rgb, 255);
 	}
 
