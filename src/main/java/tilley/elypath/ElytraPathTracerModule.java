@@ -34,44 +34,50 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	private final ColorSetting trajectoryGradientStart = new ColorSetting("Start", new Color(0x004fff)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT && trajectoryGradientCustomColors.getValue());
 	private final ColorSetting trajectoryGradientEnd = new ColorSetting("End", new Color(0x00ffff)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT && trajectoryGradientCustomColors.getValue());
 	private final BooleanSetting destinationFill = new BooleanSetting("Fill", true);
+	private final NumberSetting<Integer> destinationAlpha = new NumberSetting<>("Opacity", 150, 0, 255).incremental(1).setVisibility(destinationFill::getValue);
 	private final BooleanSetting destinationOutline = new BooleanSetting("Outline", true);
+	private final NumberSetting<Float> destinationLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f).setVisibility(destinationOutline::getValue);
 	private final BooleanSetting destinationDynamicColor = new BooleanSetting("DynamicColor", false);
 	private final NumberSetting<Float> tillImpactSeconds = new NumberSetting<>("BeforeImpact", 2.5f, 0.05f, 10.0f).incremental(0.1f).setVisibility(destinationDynamicColor::getValue);
-	private final NumberSetting<Float> destinationLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f);
-	private final BooleanSetting destinationDepthTest = new BooleanSetting("DepthTest", false);
-	private final ColorSetting destinationColor = new ColorSetting("Color", new Color(0x3a915ff0, false));
-	private final NumberSetting<Integer> destinationAlpha = new NumberSetting<>("Alpha", 150, 0, 255).incremental(1);
+	private final ColorSetting destinationColor = new ColorSetting("Color", new Color(0x3a915ff0, false)).setVisibility(() -> !destinationDynamicColor.getValue());
 
 	public ElytraPathTracerModule() {
 		super("ElytraTrajectories", "Render a trajectory to predict where player will be going with elytra", ModuleCategory.RENDER);
 
+		trajectoryDepthTest.setDescription("Allow the trajectory rendering to be not visible behind blocks.");
+		// Todo: add more descriptions for vaguely sounding settings
+
 		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors, trajectoryGradientStart, trajectoryGradientEnd);
 		trajectorySettings.addSubSettings(trajectoryLineWidth, trajectoryDepthTest, trajectoryColor);
-		renderDestination.addSubSettings(destinationFill, destinationOutline, destinationDynamicColor, tillImpactSeconds,destinationLineWidth, destinationDepthTest, destinationColor, destinationAlpha);
+		renderDestination.addSubSettings(destinationFill, destinationAlpha, destinationOutline, destinationLineWidth, destinationDynamicColor, tillImpactSeconds, destinationColor);
 		renderingSettings.addSubSettings(trajectorySettings, renderDestination);
 		this.registerSettings(renderingSettings);
 	}
 
-	/**
-	 * @return Colors -> Distance Colors -> Close / Far
-	 */
-	private static int getDistanceColor(DistanceColorType type) {
-		int defaultColor = type == DistanceColorType.CLOSE ? Color.RED.getRGB() : Color.GREEN.getRGB();
+	private List<Vec3> getTravelPoints() {
+		List<Vec3> points = new ArrayList<>();
 
-		var distanceColors = getDistanceColorsSetting();
-		if (distanceColors == null) return defaultColor;
+		if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return points;
 
-		var colorSetting = distanceColors.getSubSetting(type == DistanceColorType.CLOSE ? "Close" : "Far");
-		if (!(colorSetting instanceof ColorSetting cs)) return defaultColor;
+		Vec3 vel = mc.player.getDeltaMovement();
+		Vec3 pos = mc.player.position();
+		Vec3 lookAngle = mc.player.getLookAngle();
+		float xRot = mc.player.getXRot();
 
-		return cs.getValueRGB();
-	}
+		while (true) {
+			vel = updateFallFlyingMovement(vel, lookAngle, xRot);
+			pos = pos.add(vel);
 
-	private static Setting<?> getDistanceColorsSetting() {
-		return RusherHackAPI.getModuleManager()
-				.getFeature("Colors")
-				.map(module -> module.getSetting("Distance Colors"))
-				.orElse(null);
+			BlockPos blockPos = BlockPos.containing(pos);
+			if (!mc.level.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(blockPos.getX()), SectionPos.blockToSectionCoord(blockPos.getZ())))
+				break;
+
+			points.add(pos);
+
+			if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) break;
+		}
+
+		return points;
 	}
 
 	// skidded asf
@@ -105,8 +111,6 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		return vec3.multiply(0.99F, 0.98F, 0.99F);
 	}
 
-	/* Trajectory Renderers	 */
-
 	@Subscribe
 	private void onRender3D(EventRender3D event) {
 		if (mc.player == null || !mc.player.isFallFlying() || mc.level == null) return;
@@ -122,16 +126,14 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		boolean hasBlockCollision = !mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty();
 		if (renderDestination.getValue() && hasBlockCollision) {
 			renderer.setLineWidth(destinationLineWidth.getValue());
-			renderer.setDepthTest(destinationDepthTest.getValue());
-			if (destinationDynamicColor.getValue()) {
-				if (points.size() > tillImpactSeconds.getValue() / RusherHackAPI.getServerState().getTPS()) {
-					renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(getDistanceColor(DistanceColorType.FAR), destinationAlpha.getValue()));
-				} else {
-					renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(getDistanceColor(DistanceColorType.CLOSE), destinationAlpha.getValue()));
-				}
-			} else {
-				renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(destinationColor.getValueRGB(), destinationAlpha.getValue()));
-			}
+			int color = destinationDynamicColor.getValue()
+					? (points.size() > tillImpactSeconds.getValue() * RusherHackAPI.getServerState().getTPS()
+					? getDistanceColor(DistanceColorType.FAR)
+					: getDistanceColor(DistanceColorType.CLOSE))
+					: destinationColor.getValueRGB();
+
+			renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(),
+					ColorUtils.transparency(color, destinationAlpha.getValue()));
 		}
 
 		renderer.setLineWidth(trajectoryLineWidth.getValue());
@@ -147,31 +149,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		renderer.end();
 	}
 
-	private List<Vec3> getTravelPoints() {
-		List<Vec3> points = new ArrayList<>();
-
-		if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return points;
-
-		Vec3 vel = mc.player.getDeltaMovement();
-		Vec3 pos = mc.player.position();
-		Vec3 lookAngle = mc.player.getLookAngle();
-		float xRot = mc.player.getXRot();
-
-		while (true) {
-			vel = updateFallFlyingMovement(vel, lookAngle, xRot);
-			pos = pos.add(vel);
-
-			BlockPos blockPos = BlockPos.containing(pos);
-			if (!mc.level.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(blockPos.getX()), SectionPos.blockToSectionCoord(blockPos.getZ())))
-				break;
-
-			points.add(pos);
-
-			if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) break;
-		}
-
-		return points;
-	}
+	/* Trajectory Renderers */
 
 	private void renderTrajectoryStatic(IRenderer3D renderer, List<Vec3> points) {
 
@@ -205,8 +183,6 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		}
 	}
 
-	/* Utils */
-
 	private void renderTrajectoryRainbow(IRenderer3D renderer, List<Vec3> points) {
 
 		for (int i = points.size() - 1; i > 0; i--) {
@@ -239,11 +215,6 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		}
 	}
 
-	/**
-	 * @param idx   Index in the point list.
-	 * @param total Size of the point list.
-	 * @return The resulting rainbow color.
-	 */
 	private int getRainbow(int idx, int total) {
 		float hue = (float) idx / total;
 		int rgb = Color.HSBtoRGB(hue, 0.8F,1);
@@ -261,4 +232,24 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		CLOSE,
 		FAR
 	}
+
+	private static int getDistanceColor(DistanceColorType type) {
+		int defaultColor = type == DistanceColorType.CLOSE ? Color.RED.getRGB() : Color.GREEN.getRGB();
+
+		var distanceColors = getDistanceColorsSetting();
+		if (distanceColors == null) return defaultColor;
+
+		var colorSetting = distanceColors.getSubSetting(type == DistanceColorType.CLOSE ? "Close" : "Far");
+		if (!(colorSetting instanceof ColorSetting cs)) return defaultColor;
+
+		return cs.getValueRGB();
+	}
+
+	private static Setting<?> getDistanceColorsSetting() {
+		return RusherHackAPI.getModuleManager()
+				.getFeature("Colors")
+				.map(module -> module.getSetting("Distance Colors"))
+				.orElse(null);
+	}
+
 }
