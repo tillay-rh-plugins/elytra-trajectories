@@ -45,7 +45,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		super("ElytraTrajectories", "Render a trajectory to predict where player will be going with elytra", ModuleCategory.RENDER);
 
 		trajectoryDepthTest.setDescription("Allow the trajectory rendering to be not visible behind blocks.");
-		// Todo: add more descriptions for vaguely sounding settings
+		// Todo: add more descriptions for vaguely named settings
 
 		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors, trajectoryGradientStart, trajectoryGradientEnd);
 		trajectorySettings.addSubSettings(trajectoryLineWidth, trajectoryDepthTest, trajectoryColor);
@@ -55,6 +55,8 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	}
 
 	private List<Vec3> getTravelPoints() {
+		/* Todo: Read elytra rocket boosting source code and see if i can skid that in order to render properly after a rocket is launched */
+
 		List<Vec3> points = new ArrayList<>();
 
 		if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return points;
@@ -123,8 +125,9 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		renderer.begin(event.getMatrixStack());
 
 		BlockPos blockPos = BlockPos.containing(points.getLast());
-		boolean hasBlockCollision = !mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty();
-		if (renderDestination.getValue() && hasBlockCollision) {
+
+		// Code to choose the color to render the destination and then render it
+		if (renderDestination.getValue() && !mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) {
 			renderer.setLineWidth(destinationLineWidth.getValue());
 			int color = destinationDynamicColor.getValue()
 					? (points.size() > tillImpactSeconds.getValue() * RusherHackAPI.getServerState().getTPS()
@@ -132,13 +135,13 @@ public class ElytraPathTracerModule extends ToggleableModule {
 					: getDistanceColor(DistanceColorType.CLOSE))
 					: destinationColor.getValueRGB();
 
-			renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(),
-					ColorUtils.transparency(color, destinationAlpha.getValue()));
+			renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(color, destinationAlpha.getValue()));
 		}
 
 		renderer.setLineWidth(trajectoryLineWidth.getValue());
 		renderer.setDepthTest(trajectoryDepthTest.getValue());
 
+		// Use a different render function based on setting
 		switch (trajectoryColorMode.getValue()) {
 			case STATIC -> renderTrajectoryStatic(renderer, points);
 			case GRADIENT -> renderTrajectoryGradient(renderer, points);
