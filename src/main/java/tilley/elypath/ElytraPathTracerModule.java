@@ -112,7 +112,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		if (mc.player == null || !mc.player.isFallFlying() || mc.level == null) return;
 
 		IRenderer3D renderer = event.getRenderer();
-		List<Vec3> points = getTravelPoints(event.getPartialTicks());
+		List<Vec3> points = getTravelPoints();
 
 		if (points.size() < 2) return;
 
@@ -153,13 +153,13 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		renderer.end();
 	}
 
-	private List<Vec3> getTravelPoints(float partialTicks) {
+	private List<Vec3> getTravelPoints() {
 		List<Vec3> points = new ArrayList<>();
 
 		if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return points;
 
 		Vec3 vel = mc.player.getDeltaMovement();
-		Vec3 pos = mc.player.getPosition(partialTicks);
+		Vec3 pos = mc.player.position();
 		Vec3 lookAngle = mc.player.getLookAngle();
 		float xRot = mc.player.getXRot();
 
