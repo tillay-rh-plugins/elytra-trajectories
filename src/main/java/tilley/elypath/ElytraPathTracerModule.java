@@ -22,23 +22,24 @@ import java.util.List;
 public class ElytraPathTracerModule extends ToggleableModule {
 
 	// All Hail The Java
+	/* Todo: replace the janky setVisibility code with proper way */
 	private final NullSetting renderingSettings = new NullSetting("Rendering");
-	private final NullSetting trajectorySettings = new NullSetting("Trajectory");
+	private final BooleanSetting renderTrajectory = new BooleanSetting("Trajectory", true);
 	private final BooleanSetting renderDestination = new BooleanSetting("Destination", true);
 	private final EnumSetting<ColorMode> trajectoryColorMode = new EnumSetting<>("Mode", ColorMode.STATIC);
 	private final NumberSetting<Float> trajectoryLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f);
 	private final BooleanSetting trajectoryDepthTest = new BooleanSetting("DepthTest", false);
-	private final NullSetting trajectoryColor = new NullSetting("Color");
+	private final NullSetting trajectoryColor = new NullSetting("ColorSettings");
 	private final ColorSetting trajectoryStaticColor = new ColorSetting("Value", new Color(0x915ff0)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.STATIC);
 	private final BooleanSetting trajectoryGradientCustomColors = new BooleanSetting("CustomColors", false).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT);
-	private final ColorSetting trajectoryGradientStart = new ColorSetting("Start", new Color(0x004fff)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT && trajectoryGradientCustomColors.getValue());
-	private final ColorSetting trajectoryGradientEnd = new ColorSetting("End", new Color(0x00ffff)).setVisibility(() -> trajectoryColorMode.getValue() == ColorMode.GRADIENT && trajectoryGradientCustomColors.getValue());
+	private final ColorSetting trajectoryGradientStart = new ColorSetting("Start", new Color(0x004fff));
+	private final ColorSetting trajectoryGradientEnd = new ColorSetting("End", new Color(0x00ffff));
 	private final BooleanSetting destinationFill = new BooleanSetting("Fill", true);
-	private final NumberSetting<Integer> destinationAlpha = new NumberSetting<>("Opacity", 150, 0, 255).incremental(1).setVisibility(destinationFill::getValue);
+	private final NumberSetting<Integer> destinationAlpha = new NumberSetting<>("Opacity", 150, 0, 255).incremental(1);
 	private final BooleanSetting destinationOutline = new BooleanSetting("Outline", true);
-	private final NumberSetting<Float> destinationLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f).setVisibility(destinationOutline::getValue);
+	private final NumberSetting<Float> destinationLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f);
 	private final BooleanSetting destinationDynamicColor = new BooleanSetting("DynamicColor", false);
-	private final NumberSetting<Float> tillImpactSeconds = new NumberSetting<>("BeforeImpact", 2.5f, 0.05f, 10.0f).incremental(0.1f).setVisibility(destinationDynamicColor::getValue);
+	private final NumberSetting<Float> tillImpactSeconds = new NumberSetting<>("BeforeImpact", 2.5f, 0.05f, 10.0f).incremental(0.1f);
 	private final ColorSetting destinationColor = new ColorSetting("Color", new Color(0x3a915ff0, false)).setVisibility(() -> !destinationDynamicColor.getValue());
 
 	public ElytraPathTracerModule() {
@@ -47,10 +48,14 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		trajectoryDepthTest.setDescription("Allow the trajectory rendering to be not visible behind blocks.");
 		// Todo: add more descriptions for vaguely named settings
 
-		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors, trajectoryGradientStart, trajectoryGradientEnd);
-		trajectorySettings.addSubSettings(trajectoryLineWidth, trajectoryDepthTest, trajectoryColor);
-		renderDestination.addSubSettings(destinationFill, destinationAlpha, destinationOutline, destinationLineWidth, destinationDynamicColor, tillImpactSeconds, destinationColor);
-		renderingSettings.addSubSettings(trajectorySettings, renderDestination);
+		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors);
+		renderTrajectory.addSubSettings(trajectoryLineWidth, trajectoryDepthTest, trajectoryColor);
+		trajectoryGradientCustomColors.addSubSettings(trajectoryGradientStart, trajectoryGradientEnd);
+		renderDestination.addSubSettings(destinationFill, destinationOutline, destinationDynamicColor, destinationColor);
+		destinationFill.addSubSettings(destinationAlpha);
+		destinationOutline.addSubSettings(destinationLineWidth);
+		destinationDynamicColor.addSubSettings(tillImpactSeconds);
+		renderingSettings.addSubSettings(renderTrajectory, renderDestination);
 		this.registerSettings(renderingSettings);
 	}
 
@@ -138,15 +143,17 @@ public class ElytraPathTracerModule extends ToggleableModule {
 			renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(color, destinationAlpha.getValue()));
 		}
 
-		renderer.setLineWidth(trajectoryLineWidth.getValue());
-		renderer.setDepthTest(trajectoryDepthTest.getValue());
-
 		// Use a different render function based on setting
-		switch (trajectoryColorMode.getValue()) {
-			case STATIC -> renderTrajectoryStatic(renderer, points);
-			case GRADIENT -> renderTrajectoryGradient(renderer, points);
-			case RAINBOW -> renderTrajectoryRainbow(renderer, points);
-			case SPEED -> renderTrajectorySpeed(renderer, points);
+		if (renderTrajectory.getValue()) {
+			renderer.setLineWidth(trajectoryLineWidth.getValue());
+			renderer.setDepthTest(trajectoryDepthTest.getValue());
+
+			switch (trajectoryColorMode.getValue()) {
+				case STATIC -> renderTrajectoryStatic(renderer, points);
+				case GRADIENT -> renderTrajectoryGradient(renderer, points);
+				case RAINBOW -> renderTrajectoryRainbow(renderer, points);
+				case SPEED -> renderTrajectorySpeed(renderer, points);
+			}
 		}
 
 		renderer.end();
