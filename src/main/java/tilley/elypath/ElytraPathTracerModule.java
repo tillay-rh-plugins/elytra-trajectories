@@ -2,15 +2,24 @@ package tilley.elypath;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
 import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.Fireworks;
 import net.minecraft.world.phys.Vec3;
 import org.rusherhack.client.api.RusherHackAPI;
+import org.rusherhack.client.api.events.client.EventUpdate;
+import org.rusherhack.client.api.events.network.EventPacket;
 import org.rusherhack.client.api.events.render.EventRender3D;
 import org.rusherhack.client.api.feature.module.ModuleCategory;
 import org.rusherhack.client.api.feature.module.ToggleableModule;
 import org.rusherhack.client.api.render.IRenderer3D;
 import org.rusherhack.client.api.setting.ColorSetting;
+import org.rusherhack.client.api.utils.InventoryUtils;
 import org.rusherhack.core.event.subscribe.Subscribe;
 import org.rusherhack.core.setting.*;
 import org.rusherhack.core.utils.ColorUtils;
@@ -19,10 +28,12 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.List;
 
+
 public class ElytraPathTracerModule extends ToggleableModule {
 
 	// All Hail The Java
-	/* Todo: replace the janky setVisibility code with proper way */
+	private final BooleanSetting predictRockets = new BooleanSetting("PredictRockets", true);
+	private final NumberSetting<Float> offsetTicks = new NumberSetting<>("OffsetTicks", 11f, 0f, 22.0f).incremental(1f);
 	private final NullSetting renderingSettings = new NullSetting("Rendering");
 	private final BooleanSetting renderTrajectory = new BooleanSetting("Trajectory", true);
 	private final BooleanSetting renderDestination = new BooleanSetting("Destination", true);
@@ -42,12 +53,14 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	private final NumberSetting<Float> tillImpactSeconds = new NumberSetting<>("BeforeImpact", 2.5f, 0.05f, 10.0f).incremental(0.1f);
 	private final ColorSetting destinationColor = new ColorSetting("Color", new Color(0x3a915ff0, false)).setVisibility(() -> !destinationDynamicColor.getValue());
 
+	private int rocketBoostTicks = 0;
+
 	public ElytraPathTracerModule() {
 		super("ElytraTrajectories", "Render a trajectory to predict where player will be going with elytra", ModuleCategory.RENDER);
 
 		trajectoryDepthTest.setDescription("Allow the trajectory rendering to be not visible behind blocks.");
 		// Todo: add more descriptions for vaguely named settings
-
+		predictRockets.addSubSettings(offsetTicks);
 		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors);
 		renderTrajectory.addSubSettings(trajectoryLineWidth, trajectoryDepthTest, trajectoryColor);
 		trajectoryGradientCustomColors.addSubSettings(trajectoryGradientStart, trajectoryGradientEnd);
@@ -56,23 +69,31 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		destinationOutline.addSubSettings(destinationLineWidth);
 		destinationDynamicColor.addSubSettings(tillImpactSeconds);
 		renderingSettings.addSubSettings(renderTrajectory, renderDestination);
-		this.registerSettings(renderingSettings);
+		this.registerSettings(predictRockets, renderingSettings);
 	}
 
 	private List<Vec3> getTravelPoints() {
-		/* Todo: Read elytra rocket boosting source code and see if i can skid that in order to render properly after a rocket is launched */
-
 		List<Vec3> points = new ArrayList<>();
-
 		if (mc.player == null || mc.level == null || !mc.player.isFallFlying()) return points;
 
 		Vec3 vel = mc.player.getDeltaMovement();
 		Vec3 pos = mc.player.position();
-		Vec3 lookAngle = mc.player.getLookAngle();
+		Vec3 look = mc.player.getLookAngle();
 		float xRot = mc.player.getXRot();
 
+		if (rocketBoostTicks > 0) {
+			List<Vec3> boostPoints = getBoostTravelPoints(pos, vel, look, rocketBoostTicks);
+			points.addAll(boostPoints);
+			if (!points.isEmpty()) {
+				pos = points.get(points.size() - 1);
+			}
+			vel = mc.player.getDeltaMovement();
+		}
+		// Todo: make it so it takes in the last segment from the rocket ticks to make more fluid transition while moving head fast
+
+		// simulate normal elytra glide after boost
 		while (true) {
-			vel = updateFallFlyingMovement(vel, lookAngle, xRot);
+			vel = updateFallFlyingMovement(vel, look, xRot);
 			pos = pos.add(vel);
 
 			BlockPos blockPos = BlockPos.containing(pos);
@@ -85,6 +106,11 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		}
 
 		return points;
+	}
+
+	@Subscribe
+	private void onUpdate(EventUpdate event) {
+		if (rocketBoostTicks > 0) rocketBoostTicks--;
 	}
 
 	// skidded asf
@@ -116,6 +142,41 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		}
 
 		return vec3.multiply(0.99F, 0.98F, 0.99F);
+	}
+
+	// Do stuff whenever a rocket is used
+	@Subscribe
+	private void onPacketSend(EventPacket.Send event) {
+		if (!(event.getPacket() instanceof ServerboundUseItemPacket packet)) return;
+		if (!predictRockets.getValue()) return;
+		if (packet.getHand() != InteractionHand.MAIN_HAND) return;
+		ItemStack stack = mc.player.getInventory().getItem(InventoryUtils.getSelectedHotbarSlot());
+		if (!stack.is(Items.FIREWORK_ROCKET)) return;
+		Fireworks fireworks = stack.get(DataComponents.FIREWORKS);
+		if (fireworks == null) return;
+		int flight = fireworks.flightDuration();
+		rocketBoostTicks = 10 * flight + Math.round(offsetTicks.getValue());
+	}
+
+	private List<Vec3> getBoostTravelPoints(Vec3 pos, Vec3 vel, Vec3 look, int ticks) {
+		List<Vec3> points = new ArrayList<>();
+		for (int i = 0; i < ticks; i++) {
+			vel = applyRocketBoostStep(vel, look);
+			pos = pos.add(vel);
+			points.add(pos);
+			BlockPos blockPos = BlockPos.containing(pos);
+			if (!mc.level.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(blockPos.getX()), SectionPos.blockToSectionCoord(blockPos.getZ()))
+				|| !mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) break;
+		}
+		return points;
+	}
+
+	private static Vec3 applyRocketBoostStep(Vec3 vel, Vec3 look) {
+		return vel.add(
+				look.x * 0.1 + (look.x * 1.5 - vel.x) * 0.5,
+				look.y * 0.1 + (look.y * 1.5 - vel.y) * 0.5,
+				look.z * 0.1 + (look.z * 1.5 - vel.z) * 0.5
+		);
 	}
 
 	@Subscribe
@@ -162,7 +223,6 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	/* Trajectory Renderers */
 
 	private void renderTrajectoryStatic(IRenderer3D renderer, List<Vec3> points) {
-
 		for (int i = points.size() - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
 			Vec3 point = points.get(i);
@@ -194,7 +254,6 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	}
 
 	private void renderTrajectoryRainbow(IRenderer3D renderer, List<Vec3> points) {
-
 		for (int i = points.size() - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
 			Vec3 point = points.get(i);
@@ -207,7 +266,6 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
 	private void renderTrajectorySpeed(IRenderer3D renderer, List<Vec3> points) {
 		double min = 0, max = 80;
-
 		for (int i = points.size() - 1; i > 0; i--) {
 			Vec3 prevPoint = points.get(i - 1);
 			Vec3 point = points.get(i);
