@@ -60,6 +60,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
 		trajectoryDepthTest.setDescription("Allow the trajectory rendering to be not visible behind blocks.");
 		// Todo: add more descriptions for vaguely named settings
+		
 		predictRockets.addSubSettings(offsetTicks);
 		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors);
 		renderTrajectory.addSubSettings(trajectoryLineWidth, trajectoryDepthTest, trajectoryColor);
@@ -85,38 +86,33 @@ public class ElytraPathTracerModule extends ToggleableModule {
 			List<Vec3> boostPoints = getBoostTravelPoints(pos, vel, look, rocketBoostTicks);
 			points.addAll(boostPoints);
 			if (!points.isEmpty()) {
-				pos = points.get(points.size() - 1);
+				pos = points.getLast();
+				if (boostPoints.size() >= 2) {
+					Vec3 last = boostPoints.getLast();
+					Vec3 prev = boostPoints.get(boostPoints.size() - 2);
+					vel = last.subtract(prev);
+				}
 			}
-			vel = mc.player.getDeltaMovement();
 		}
-		// Todo: make it so it takes in the last segment from the rocket ticks to make more fluid transition while moving head fast
 
-		// simulate normal elytra glide after boost
 		while (true) {
 			vel = updateFallFlyingMovement(vel, look, xRot);
 			pos = pos.add(vel);
-
 			BlockPos blockPos = BlockPos.containing(pos);
-			if (!mc.level.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(blockPos.getX()), SectionPos.blockToSectionCoord(blockPos.getZ())))
-				break;
-
+			if (!mc.level.getChunkSource().hasChunk(SectionPos.blockToSectionCoord(blockPos.getX()), SectionPos.blockToSectionCoord(blockPos.getZ()))) break;
 			points.add(pos);
-
 			if (!mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) break;
 		}
-
 		return points;
 	}
 
 	@Subscribe
 	private void onUpdate(EventUpdate event) {
+		// Decrease the remaining ticks of active boost (if there is one) every tick
 		if (rocketBoostTicks > 0) rocketBoostTicks--;
 	}
 
 	// skidded asf
-	// I may or may not have no idea how this works, I just copied mc source code
-	// and changed various things to make it work here and fit in with other features
-	// OG src at net.minecraft.world.entity.LivingEntity # updateFallFlyingMovement
 	private static Vec3 updateFallFlyingMovement(Vec3 vec3, Vec3 lookAngle, float xRot) {
 		if (mc.player == null) return null;
 
@@ -147,14 +143,19 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	// Do stuff whenever a rocket is used
 	@Subscribe
 	private void onPacketSend(EventPacket.Send event) {
+		// Don't do anything if this isnt the exact type of packet we want
 		if (!(event.getPacket() instanceof ServerboundUseItemPacket packet)) return;
-		if (!predictRockets.getValue()) return;
+		if (!predictRockets.getValue() || mc.player == null) return;
 		if (packet.getHand() != InteractionHand.MAIN_HAND) return;
+
+		// If a firework is used in this packet, set flight var to be duration of used firework (1,2,3)
 		ItemStack stack = mc.player.getInventory().getItem(InventoryUtils.getSelectedHotbarSlot());
 		if (!stack.is(Items.FIREWORK_ROCKET)) return;
 		Fireworks fireworks = stack.get(DataComponents.FIREWORKS);
 		if (fireworks == null) return;
 		int flight = fireworks.flightDuration();
+
+		// Make var ticks how long boost will be based on that rocket approx
 		rocketBoostTicks = 10 * flight + Math.round(offsetTicks.getValue());
 	}
 
