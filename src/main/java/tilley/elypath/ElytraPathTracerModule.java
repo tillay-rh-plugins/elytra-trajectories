@@ -11,6 +11,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.Fireworks;
 import net.minecraft.world.phys.Vec3;
+
 import org.rusherhack.client.api.RusherHackAPI;
 import org.rusherhack.client.api.events.client.EventUpdate;
 import org.rusherhack.client.api.events.network.EventPacket;
@@ -32,6 +33,7 @@ import java.util.List;
 public class ElytraPathTracerModule extends ToggleableModule {
 
 	// All Hail The Java
+	@SuppressWarnings("FieldCanBeLocal")
 	private final BooleanSetting predictRockets = new BooleanSetting("PredictRockets", true);
 	private final NumberSetting<Float> offsetTicks = new NumberSetting<>("OffsetTicks", 11f, 0f, 22.0f).incremental(1f);
 	private final NullSetting renderingSettings = new NullSetting("Rendering");
@@ -48,28 +50,32 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	private final BooleanSetting destinationFill = new BooleanSetting("Fill", true);
 	private final NumberSetting<Integer> destinationAlpha = new NumberSetting<>("Opacity", 150, 0, 255).incremental(1);
 	private final BooleanSetting destinationOutline = new BooleanSetting("Outline", true);
-	private final NumberSetting<Float> destinationLineWidth = new NumberSetting<>("LineWidth", 2.5f, 0.5f, 15.0f).incremental(0.1f);
 	private final BooleanSetting destinationDynamicColor = new BooleanSetting("DynamicColor", false);
 	private final NumberSetting<Float> tillImpactSeconds = new NumberSetting<>("BeforeImpact", 2.5f, 0.05f, 10.0f).incremental(0.1f);
 	private final ColorSetting destinationColor = new ColorSetting("Color", new Color(0x3a915ff0, false)).setVisibility(() -> !destinationDynamicColor.getValue());
 
+	// Global counter on how long is left on the current rocket boost
 	private int rocketBoostTicks = 0;
 
 	public ElytraPathTracerModule() {
 		super("ElytraTrajectories", "Render a trajectory to predict where player will be going with elytra", ModuleCategory.RENDER);
 
-		trajectoryDepthTest.setDescription("Allow the trajectory rendering to be not visible behind blocks.");
-		// Todo: add more descriptions for vaguely named settings
-		
+		trajectoryDepthTest.setDescription("Allow the trajectory rendering to be not visible behind blocks");
+		predictRockets.setDescription("Tries to predict new trajectory after rocket has been used");
+		offsetTicks.setDescription("Ticks to make up for server side randomness to how long rocket boost lasts");
+		destinationDynamicColor.setDescription("Change the color of the destination box based on how long until impact");
+		tillImpactSeconds.setDescription("How many seconds before impact to change the color of the destination box");
+		trajectoryColorMode.setDescription("Options for different ways to color the trajectory");
+
 		predictRockets.addSubSettings(offsetTicks);
 		trajectoryColor.addSubSettings(trajectoryColorMode, trajectoryStaticColor, trajectoryGradientCustomColors);
 		renderTrajectory.addSubSettings(trajectoryLineWidth, trajectoryDepthTest, trajectoryColor);
 		trajectoryGradientCustomColors.addSubSettings(trajectoryGradientStart, trajectoryGradientEnd);
 		renderDestination.addSubSettings(destinationFill, destinationOutline, destinationDynamicColor, destinationColor);
 		destinationFill.addSubSettings(destinationAlpha);
-		destinationOutline.addSubSettings(destinationLineWidth);
 		destinationDynamicColor.addSubSettings(tillImpactSeconds);
 		renderingSettings.addSubSettings(renderTrajectory, renderDestination);
+
 		this.registerSettings(predictRockets, renderingSettings);
 	}
 
@@ -112,7 +118,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		if (rocketBoostTicks > 0) rocketBoostTicks--;
 	}
 
-	// skidded asf
+	// Taken from minecraft src
 	private static Vec3 updateFallFlyingMovement(Vec3 vec3, Vec3 lookAngle, float xRot) {
 		if (mc.player == null) return null;
 
@@ -143,7 +149,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 	// Do stuff whenever a rocket is used
 	@Subscribe
 	private void onPacketSend(EventPacket.Send event) {
-		// Don't do anything if this isnt the exact type of packet we want
+		// Don't do anything if this isn't the exact type of packet we want
 		if (!(event.getPacket() instanceof ServerboundUseItemPacket packet)) return;
 		if (!predictRockets.getValue() || mc.player == null) return;
 		if (packet.getHand() != InteractionHand.MAIN_HAND) return;
@@ -155,12 +161,13 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		if (fireworks == null) return;
 		int flight = fireworks.flightDuration();
 
-		// Make var ticks how long boost will be based on that rocket approx
+		// Make classwide var ticks how long boost will be based on the rocket used (approximately)
 		rocketBoostTicks = 10 * flight + Math.round(offsetTicks.getValue());
 	}
 
 	private List<Vec3> getBoostTravelPoints(Vec3 pos, Vec3 vel, Vec3 look, int ticks) {
 		List<Vec3> points = new ArrayList<>();
+		if (mc.level == null) return points; // Avoid super weird obscure crashes
 		for (int i = 0; i < ticks; i++) {
 			vel = applyRocketBoostStep(vel, look);
 			pos = pos.add(vel);
@@ -189,13 +196,13 @@ public class ElytraPathTracerModule extends ToggleableModule {
 
 		if (points.size() < 2) return;
 
-		renderer.begin(event.getMatrixStack());
-
 		BlockPos blockPos = BlockPos.containing(points.getLast());
 
 		// Code to choose the color to render the destination and then render it
 		if (renderDestination.getValue() && !mc.level.getBlockState(blockPos).getCollisionShape(mc.level, blockPos).isEmpty()) {
-			renderer.setLineWidth(destinationLineWidth.getValue());
+			renderer.begin(event.getMatrixStack());
+
+			renderer.setLineWidth(2f);
 			int color = destinationDynamicColor.getValue()
 					? (points.size() > tillImpactSeconds.getValue() * RusherHackAPI.getServerState().getTPS()
 					? getDistanceColor(DistanceColorType.FAR)
@@ -203,10 +210,14 @@ public class ElytraPathTracerModule extends ToggleableModule {
 					: destinationColor.getValueRGB();
 
 			renderer.drawBox(blockPos, destinationFill.getValue(), destinationOutline.getValue(), ColorUtils.transparency(color, destinationAlpha.getValue()));
+
+			renderer.end();
 		}
 
 		// Use a different render function based on setting
 		if (renderTrajectory.getValue()) {
+			renderer.begin(event.getMatrixStack());
+
 			renderer.setLineWidth(trajectoryLineWidth.getValue());
 			renderer.setDepthTest(trajectoryDepthTest.getValue());
 
@@ -216,9 +227,9 @@ public class ElytraPathTracerModule extends ToggleableModule {
 				case RAINBOW -> renderTrajectoryRainbow(renderer, points);
 				case SPEED -> renderTrajectorySpeed(renderer, points);
 			}
-		}
 
-		renderer.end();
+			renderer.end();
+		}
 	}
 
 	/* Trajectory Renderers */
