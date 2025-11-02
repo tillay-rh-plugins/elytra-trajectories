@@ -155,7 +155,7 @@ public class ElytraPathTracerModule extends ToggleableModule {
 		if (packet.getHand() != InteractionHand.MAIN_HAND) return;
 
 		// If a firework is used in this packet, set flight var to be duration of used firework (1,2,3)
-		ItemStack stack = mc.player.getInventory().getItem(InventoryUtils.getSelectedHotbarSlot());
+		ItemStack stack = mc.player.getInventory().getItem(mc.player.getInventory().selected);
 		if (!stack.is(Items.FIREWORK_ROCKET)) return;
 		Fireworks fireworks = stack.get(DataComponents.FIREWORKS);
 		if (fireworks == null) return;
